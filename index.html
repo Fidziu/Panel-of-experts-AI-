@@ -36,9 +36,23 @@
                     <textarea id="instructions" placeholder="Special instructions for AI agents..."></textarea>
                 </div>
             </div>
+            
+            <!-- Model Selection -->
+            <div class="model-selection">
+                <h4 class="model-selection-title">🔧 Active AI Models</h4>
+                <div class="model-toggles" id="modelToggles">
+                    <!-- Model checkboxes will be populated by JavaScript -->
+                </div>
+                <div class="model-actions">
+                    <button class="action-btn" id="selectAllBtn">✅ Select All</button>
+                    <button class="action-btn" id="deselectAllBtn">❌ Deselect All</button>
+                    <span class="model-count" id="modelCount">9 models selected</span>
+                </div>
+            </div>
+            
             <div class="input-row">
                 <div class="input-group">
-                    <label for="prompt">Prompt</label>
+                    <label for="prompt">Prompt <span class="shortcut-hint">(Ctrl+Enter to send)</span></label>
                     <textarea id="prompt" placeholder="Your question or prompt for the AI panel..." required></textarea>
                 </div>
                 <div class="button-group">

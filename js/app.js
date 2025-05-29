@@ -67,6 +67,9 @@ class AppState {
         this.requestStartTime = null;
         this.isDemo = false;
         
+        // Active models
+        this.activeModels = new Set(CONFIG.AI_AGENTS);
+        
         // Timers and counters
         this.agentTimers = new Map();
         this.agentStartTimes = new Map();
@@ -88,10 +91,25 @@ class AppState {
         this.agentStartTimes.clear();
         this.agentTokenCounters.clear();
         
-        CONFIG.AI_AGENTS.forEach(agent => {
+        // Only reset active models
+        this.getActiveAgents().forEach(agent => {
             this.agentStartTimes.set(agent, Date.now());
             this.agentTokenCounters.set(agent, 0);
         });
+    }
+    
+    getActiveAgents() {
+        return Array.from(this.activeModels);
+    }
+    
+    toggleModel(agent) {
+        if (this.activeModels.has(agent)) {
+            this.activeModels.delete(agent);
+        } else {
+            this.activeModels.add(agent);
+        }
+        ModelManager.updateModelCount();
+        ModelManager.updateVisibility();
     }
     
     clearAllTimers() {
@@ -216,8 +234,130 @@ class APIHandler {
 }
 
 // =============================================================================
-// UI MANAGER
+// MODEL MANAGER
 // =============================================================================
+
+class ModelManager {
+    static init() {
+        this.createModelToggles();
+        this.setupEventListeners();
+        this.updateModelCount();
+    }
+    
+    static createModelToggles() {
+        const togglesContainer = DOMUtils.$('#modelToggles');
+        if (!togglesContainer) return;
+        
+        togglesContainer.innerHTML = '';
+        
+        CONFIG.AI_AGENTS.forEach(agent => {
+            const toggleDiv = DOMUtils.createElement('div', 'model-toggle', `
+                <input type="checkbox" id="toggle-${agent}" class="model-checkbox" checked>
+                <label for="toggle-${agent}" class="model-name">${CONFIG.AGENT_NAMES[agent]}</label>
+            `);
+            
+            toggleDiv.addEventListener('click', (e) => {
+                if (e.target.type !== 'checkbox') {
+                    const checkbox = toggleDiv.querySelector('.model-checkbox');
+                    checkbox.checked = !checkbox.checked;
+                }
+                this.handleToggle(agent);
+            });
+            
+            togglesContainer.appendChild(toggleDiv);
+        });
+    }
+    
+    static setupEventListeners() {
+        const selectAllBtn = DOMUtils.$('#selectAllBtn');
+        const deselectAllBtn = DOMUtils.$('#deselectAllBtn');
+        
+        if (selectAllBtn) {
+            selectAllBtn.addEventListener('click', () => this.selectAll());
+        }
+        
+        if (deselectAllBtn) {
+            deselectAllBtn.addEventListener('click', () => this.deselectAll());
+        }
+    }
+    
+    static handleToggle(agent) {
+        const checkbox = DOMUtils.$(`#toggle-${agent}`);
+        const toggleDiv = checkbox.closest('.model-toggle');
+        
+        if (checkbox.checked) {
+            appState.activeModels.add(agent);
+            toggleDiv.classList.remove('disabled');
+        } else {
+            appState.activeModels.delete(agent);
+            toggleDiv.classList.add('disabled');
+        }
+        
+        this.updateModelCount();
+        this.updateVisibility();
+    }
+    
+    static selectAll() {
+        CONFIG.AI_AGENTS.forEach(agent => {
+            const checkbox = DOMUtils.$(`#toggle-${agent}`);
+            const toggleDiv = checkbox.closest('.model-toggle');
+            
+            checkbox.checked = true;
+            toggleDiv.classList.remove('disabled');
+            appState.activeModels.add(agent);
+        });
+        
+        this.updateModelCount();
+        this.updateVisibility();
+    }
+    
+    static deselectAll() {
+        CONFIG.AI_AGENTS.forEach(agent => {
+            const checkbox = DOMUtils.$(`#toggle-${agent}`);
+            const toggleDiv = checkbox.closest('.model-toggle');
+            
+            checkbox.checked = false;
+            toggleDiv.classList.add('disabled');
+            appState.activeModels.delete(agent);
+        });
+        
+        this.updateModelCount();
+        this.updateVisibility();
+    }
+    
+    static updateModelCount() {
+        const count = appState.activeModels.size;
+        DOMUtils.updateText('#modelCount', `${count} model${count !== 1 ? 's' : ''} selected`);
+        
+        // Update send button state
+        const sendBtn = DOMUtils.$('#sendBtn');
+        if (sendBtn) {
+            if (count === 0) {
+                sendBtn.disabled = true;
+                sendBtn.textContent = '❌ Select models first';
+            } else {
+                sendBtn.disabled = false;
+                sendBtn.textContent = '🚀 Ask Panel';
+            }
+        }
+    }
+    
+    static updateVisibility() {
+        // Update timer cards visibility
+        CONFIG.AI_AGENTS.forEach(agent => {
+            const timerCard = DOMUtils.$(`#timer-${agent}`);
+            const chatWindow = DOMUtils.$(`#chat-${agent}`);
+            
+            if (timerCard) {
+                timerCard.style.display = appState.activeModels.has(agent) ? 'block' : 'none';
+            }
+            
+            if (chatWindow) {
+                chatWindow.style.display = appState.activeModels.has(agent) ? 'flex' : 'none';
+            }
+        });
+    }
+}
 
 class UIManager {
     static init() {
@@ -226,6 +366,9 @@ class UIManager {
         this.updateAPIStatus('unknown');
         this.setupEventListeners();
         this.updateCurrentURL();
+        
+        // Initialize model manager
+        ModelManager.init();
     }
     
     static setupEventListeners() {
@@ -237,10 +380,21 @@ class UIManager {
         if (demoBtn) demoBtn.addEventListener('click', () => RequestHandler.runDemo());
         
         if (promptInput) {
+            // Enhanced keyboard handling
             promptInput.addEventListener('keydown', (event) => {
-                if (event.key === 'Enter' && event.ctrlKey) {
-                    RequestHandler.sendRequest();
+                if (event.key === 'Enter') {
+                    if (event.ctrlKey) {
+                        event.preventDefault();
+                        RequestHandler.sendRequest();
+                    }
+                    // Allow normal Enter for new lines
                 }
+            });
+            
+            // Auto-resize textarea
+            promptInput.addEventListener('input', () => {
+                promptInput.style.height = 'auto';
+                promptInput.style.height = promptInput.scrollHeight + 'px';
             });
         }
     }
@@ -306,7 +460,9 @@ class UIManager {
     }
     
     static resetInterface() {
-        CONFIG.AI_AGENTS.forEach(agent => {
+        const activeAgents = appState.getActiveAgents();
+        
+        activeAgents.forEach(agent => {
             const timerCard = DOMUtils.$(`#timer-${agent}`);
             const chatWindow = DOMUtils.$(`#chat-${agent}`);
             const typingIndicator = DOMUtils.$(`#typing-${agent}`);
@@ -567,6 +723,12 @@ class RequestHandler {
             return;
         }
         
+        const activeAgents = appState.getActiveAgents();
+        if (activeAgents.length === 0) {
+            alert('Please select at least one AI model!');
+            return;
+        }
+        
         // Setup session
         appState.currentSessionId = sessionId || `session_${Date.now()}`;
         DOMUtils.updateText('#sessionId', appState.currentSessionId);
@@ -591,8 +753,8 @@ class RequestHandler {
             
             const result = await APIHandler.sendRequest(data);
             
-            // Process responses
-            CONFIG.AI_AGENTS.forEach(agent => {
+            // Process responses only for active agents
+            activeAgents.forEach(agent => {
                 if (result[agent]) {
                     TypingSimulator.simulateTyping(agent, result[agent]);
                 } else {
@@ -602,8 +764,8 @@ class RequestHandler {
             });
             
         } catch (error) {
-            // Handle error for all agents
-            CONFIG.AI_AGENTS.forEach(agent => {
+            // Handle error for active agents only
+            activeAgents.forEach(agent => {
                 DOMUtils.updateText(`#response-${agent}`, 'CORS blocked - try demo mode or deploy to Netlify');
                 TimerManager.updateTimer(agent, 'error');
             });
@@ -616,6 +778,12 @@ class RequestHandler {
         appState.isDemo = true;
         UIManager.updateAPIStatus('demo');
         DebugLogger.log('✨ Running demo mode with simulated responses...');
+        
+        const activeAgents = appState.getActiveAgents();
+        if (activeAgents.length === 0) {
+            alert('Please select at least one AI model!');
+            return;
+        }
         
         const prompt = DOMUtils.$('#prompt')?.value.trim() || 'What is the best AI model for text analysis?';
         DOMUtils.updateText('#prompt', prompt);
@@ -630,8 +798,8 @@ class RequestHandler {
         // Reset UI
         this.prepareForRequest();
         
-        // Start demo with staggered delays
-        CONFIG.AI_AGENTS.forEach((agent, index) => {
+        // Start demo with staggered delays - only for active agents
+        activeAgents.forEach((agent, index) => {
             setTimeout(() => {
                 TimerManager.updateTimer(agent, 'responding');
                 
@@ -650,10 +818,10 @@ class RequestHandler {
             }, index * 100);
         });
         
-        DebugLogger.log(`✨ Demo started - simulating ${CONFIG.AI_AGENTS.length} AI agents`, {
+        DebugLogger.log(`✨ Demo started - simulating ${activeAgents.length} AI agents`, {
             mode: 'demo',
             prompt: prompt,
-            agents: CONFIG.AI_AGENTS.length
+            agents: activeAgents.length
         });
         
         // Reset demo mode after completion
@@ -676,8 +844,8 @@ class RequestHandler {
         
         appState.requestStartTime = Date.now();
         
-        // Start all agent timers
-        CONFIG.AI_AGENTS.forEach(agent => {
+        // Start timers only for active agents
+        appState.getActiveAgents().forEach(agent => {
             TimerManager.updateTimer(agent, 'responding');
         });
     }
@@ -685,7 +853,8 @@ class RequestHandler {
     static restoreButton(sendBtn) {
         if (sendBtn) {
             sendBtn.disabled = false;
-            sendBtn.textContent = '🚀 Ask Panel';
+            const count = appState.activeModels.size;
+            sendBtn.textContent = count > 0 ? '🚀 Ask Panel' : '❌ Select models first';
         }
     }
 }
